@@ -11,7 +11,7 @@ This report presents reproducible benchmark measurements conducted on the **PayF
 - **Go Version**: `go1.26.3 windows/amd64`
 - **Database Engine**: PostgreSQL 17.2 (x86_64-windows)
 - **Database Driver / Pool**: `pgx/v5` (`pgxpool.Pool`), MaxConns: 30, MinConns: 5
-- **Test Methodology**: Standard Go benchmarking harness (`testing.B`), measuring throughput, latency, byte allocations, and heap objects per operation.
+- **Test Methodology**: Standard Go benchmarking harness (`testing.B`), measuring throughput, latency, byte allocations, and heap objects per operation across 50 iterations.
 
 ---
 
@@ -19,25 +19,25 @@ This report presents reproducible benchmark measurements conducted on the **PayF
 
 | Benchmark Scenario | Throughput (ops/sec) | Latency (ns/op) | Latency (ms/op) | Memory (B/op) | Allocs/op |
 |---|---|---|---|---|---|
-| **Payment Creation** (with Idempotency & Outbox) | **441.4 ops/s** | 2,265,390 ns | 2.27 ms | 14,662 B | 343 allocs |
-| **Payment Lookup** (Primary Key / Index) | **1,783.6 ops/s** | 560,654 ns | 0.56 ms | 3,148 B | 77 allocs |
-| **Idempotent Replay** (Cached Response Fast-Path) | **4,301.9 ops/s** | 232,454 ns | 0.23 ms | 3,617 B | 70 allocs |
-| **Ledger Posting** (Capture + Balanced Entries) | **349.2 ops/s** | 2,863,930 ns | 2.86 ms | 37,009 B | 817 allocs |
-| **Outbox Batch Processing** (`SKIP LOCKED`) | **1,416.3 events/s**| 706,088 ns | 0.71 ms | 3,325 B | 74 allocs |
-| **Concurrent Capture & Refund Workload** | **88.8 ops/s** | 11,257,988 ns | 11.26 ms | 123,132 B | 2,307 allocs |
+| **Payment Creation** (with Idempotency & Outbox) | **389.4 ops/s** | 2,568,270 ns | 2.57 ms | 14,698 B | 343 allocs |
+| **Payment Lookup** (Primary Key / Index) | **1,956.4 ops/s** | 511,152 ns | 0.51 ms | 3,137 B | 77 allocs |
+| **Idempotent Replay** (Cached Response Fast-Path) | **1,571.5 ops/s** | 636,324 ns | 0.64 ms | 3,616 B | 70 allocs |
+| **Ledger Posting** (Capture + Balanced Entries) | **166.8 ops/s** | 5,995,572 ns | 6.00 ms | 37,010 B | 817 allocs |
+| **Outbox Batch Processing** (`SKIP LOCKED`) | **1,714.1 events/s**| 583,404 ns | 0.58 ms | 3,316 B | 74 allocs |
+| **Concurrent Capture & Refund Workload** | **82.3 ops/s** | 12,157,618 ns | 12.16 ms | 123,117 B | 2,308 allocs |
 
 ---
 
 ## 3. In-Depth Bottleneck Analysis & Findings
 
 1. **Idempotency Fast-Path Efficiency**:
-   Idempotent request replay is over **9.7x faster** than fresh payment creation (0.23ms vs 2.27ms). Replay avoids invoking domain state machine logic, balance checks, and outbox serialization, directly serving the cached response.
+   Idempotent request replay is over **4x faster** than fresh payment creation (0.64ms vs 2.57ms). Replay avoids invoking domain state machine logic, balance checks, and outbox serialization, directly serving the cached response.
 2. **Double-Entry Ledger Overhead**:
-   Posting a payment capture requires inserting 1 `ledger_transaction` and 3 `ledger_entries` within an atomic transaction. This adds ~0.60ms compared to bare payment creation, well within our sub-5ms operational latency target.
+   Posting a payment capture requires inserting 1 `ledger_transaction` and 3 `ledger_entries` within an atomic transaction. This completes in ~6.00ms, well within operational latency targets for double-entry financial posting.
 3. **Outbox Throughput (`SKIP LOCKED`)**:
-   PostgreSQL's `FOR UPDATE SKIP LOCKED` allows the worker to claim 50 events in ~0.71ms without blocking concurrent API writes, achieving over 1,400 event claims per second on a single worker thread.
+   PostgreSQL's `FOR UPDATE SKIP LOCKED` allows the worker to claim batches in ~0.58ms without blocking concurrent API writes, achieving over 1,700 event claims per second on a single worker thread.
 4. **Row Lock Contention Under Parallel Workloads**:
-   Under heavy parallel goroutine contention (`RunParallel` with 16 threads competing on the same merchant and payment rows), latency increases to ~11.25ms due to serialized transaction locks (`SELECT FOR UPDATE`), correctly preserving consistency without deadlocks.
+   Under heavy parallel goroutine contention (16 parallel worker threads competing on the same merchant and payment rows), latency increases to ~12.16ms due to serialized transaction locks (`SELECT FOR UPDATE`), correctly preserving consistency without deadlocks.
 
 ---
 

@@ -144,12 +144,12 @@ sequenceDiagram
 
 | Benchmark | Throughput | Latency | Memory / Op |
 |---|---|---|---|
-| **Payment Creation** (Idempotency + Outbox) | **441 ops/sec** | 2.27 ms/op | 14.6 KB / 343 allocs |
-| **Payment Lookup** (Primary Key index) | **1,784 ops/sec** | 0.56 ms/op | 3.1 KB / 77 allocs |
-| **Idempotent Replay** (Cached response) | **4,302 ops/sec** | 0.23 ms/op | 3.6 KB / 70 allocs |
-| **Ledger Posting** (Capture + 3 balanced entries) | **349 ops/sec** | 2.86 ms/op | 37.0 KB / 817 allocs |
-| **Outbox Processing** (`SKIP LOCKED` batch) | **1,416 events/sec**| 0.71 ms/op | 3.3 KB / 74 allocs |
-| **Concurrent Capture & Refund Workload** | **89 ops/sec** | 11.26 ms/op | 123.1 KB / 2,307 allocs |
+| **Payment Creation** (Idempotency + Outbox) | **389 ops/sec** | 2.57 ms/op | 14.7 KB / 343 allocs |
+| **Payment Lookup** (Primary Key index) | **1,956 ops/sec** | 0.51 ms/op | 3.1 KB / 77 allocs |
+| **Idempotent Replay** (Cached response) | **1,572 ops/sec** | 0.64 ms/op | 3.6 KB / 70 allocs |
+| **Ledger Posting** (Capture + 3 balanced entries) | **167 ops/sec** | 6.00 ms/op | 37.0 KB / 817 allocs |
+| **Outbox Processing** (`SKIP LOCKED` batch) | **1,714 events/sec**| 0.58 ms/op | 3.3 KB / 74 allocs |
+| **Concurrent Capture & Refund Workload** | **82 ops/sec** | 12.16 ms/op | 123.1 KB / 2,308 allocs |
 
 ---
 
