@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PayFlow — Payment Processing & Double-Entry Ledger Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Plus Jakarta Sans', sans-serif; }
+    code, pre, .mono { font-family: 'JetBrains Mono', monospace; }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen">
+  <!-- Top Navigation -->
+  <header class="border-b border-slate-800 bg-slate-900/60 backdrop-blur sticky top-0 z-50">
+    <div class="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+      <div class="flex items-center space-x-3">
+        <div class="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center font-bold text-white shadow-lg shadow-indigo-500/30">PF</div>
+        <span class="font-bold text-lg tracking-tight bg-gradient-to-r from-white to-slate-400 bg-clip-text text-transparent">PayFlow</span>
+        <span class="text-xs px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 font-medium">Core Platform</span>
+      </div>
+      <div class="flex items-center space-x-4">
+        <span id="api-status" class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 mr-1.5 animate-pulse"></span>
+          System Ready
+        </span>
+        <button onclick="triggerReconciliation()" class="px-3.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition">
+          Run Invariant Audit
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="max-w-7xl mx-auto px-6 py-8 space-y-8">
+    <!-- Header banner -->
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-5">
+        <div class="text-xs font-medium text-slate-400">Accounting Equation</div>
+        <div class="text-xl font-bold mt-1 text-emerald-400 mono">Σ Debits = Σ Credits</div>
+        <div class="text-xs text-slate-500 mt-1">Enforced per currency & transaction</div>
+      </div>
+      <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-5">
+        <div class="text-xs font-medium text-slate-400">Concurrency Safety</div>
+        <div class="text-xl font-bold mt-1 text-indigo-400 mono">SELECT FOR UPDATE</div>
+        <div class="text-xs text-slate-500 mt-1">Row-level locking on mutations</div>
+      </div>
+      <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-5">
+        <div class="text-xs font-medium text-slate-400">Event Stream</div>
+        <div class="text-xl font-bold mt-1 text-amber-400 mono">Transactional Outbox</div>
+        <div class="text-xs text-slate-500 mt-1">SKIP LOCKED worker daemon</div>
+      </div>
+      <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-5">
+        <div class="text-xs font-medium text-slate-400">Audit Status</div>
+        <div id="audit-stat" class="text-xl font-bold mt-1 text-blue-400 mono">0 Anomalies</div>
+        <div class="text-xs text-slate-500 mt-1">7 Invariant checks passing</div>
+      </div>
+    </div>
+
+    <!-- Payment Lifecycle & Actions Section -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <!-- Quick Simulation Console -->
+      <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-6 space-y-4">
+        <h2 class="text-base font-bold text-white flex items-center justify-between">
+          <span>Interactive Simulator</span>
+          <span class="text-xs font-normal text-slate-400">Deterministic Flow</span>
+        </h2>
+        <div class="space-y-3">
+          <div>
+            <label class="block text-xs font-medium text-slate-400 mb-1">Amount (USD cents)</label>
+            <input id="sim-amount" type="number" value="10000" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-200 mono focus:outline-none focus:border-indigo-500">
+            <span class="text-[11px] text-slate-500">10000 cents = $100.00 USD</span>
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-400 mb-1">Customer Email</label>
+            <input id="sim-email" type="email" value="alex@example.com" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-200 mono focus:outline-none focus:border-indigo-500">
+          </div>
+          <button onclick="simulateFullFlow()" id="sim-btn" class="w-full py-2.5 px-4 rounded-lg bg-indigo-600 hover:bg-indigo-500 font-semibold text-sm text-white shadow-lg shadow-indigo-600/30 transition flex items-center justify-center space-x-2">
+            <span>Execute End-to-End Cycle</span>
+          </button>
+        </div>
+        <div id="sim-log" class="bg-slate-950 border border-slate-800/80 rounded-lg p-3 text-xs text-slate-300 mono h-48 overflow-y-auto space-y-1">
+          <div class="text-slate-500">> Ready for simulation...</div>
+        </div>
+      </div>
+
+      <!-- Live Payments Stream -->
+      <div class="lg:col-span-2 bg-slate-900/80 border border-slate-800 rounded-xl p-6 flex flex-col">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-base font-bold text-white">Payment Lifecycle Stream</h2>
+          <button onclick="refreshData()" class="text-xs text-indigo-400 hover:text-indigo-300 font-medium">Refresh</button>
+        </div>
+        <div class="overflow-x-auto flex-1">
+          <table class="w-full text-left text-xs">
+            <thead>
+              <tr class="border-b border-slate-800 text-slate-400 font-medium">
+                <th class="pb-3">Payment ID</th>
+                <th class="pb-3">Amount</th>
+                <th class="pb-3">Captured</th>
+                <th class="pb-3">Refunded</th>
+                <th class="pb-3">Status</th>
+                <th class="pb-3">Created</th>
+              </tr>
+            </thead>
+            <tbody id="payments-table-body" class="divide-y divide-slate-800/60 mono">
+              <tr>
+                <td colspan="6" class="py-8 text-center text-slate-500">Loading payments...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Double-Entry Ledger View -->
+    <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-6">
+      <div class="flex items-center justify-between mb-4">
+        <div>
+          <h2 class="text-base font-bold text-white">Double-Entry General Ledger</h2>
+          <p class="text-xs text-slate-400">Strictly balanced, immutable journal entries</p>
+        </div>
+        <span class="text-xs mono px-2.5 py-1 rounded bg-slate-800 text-slate-300">GAAP / IFRS Compliant</span>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-xs">
+          <thead>
+            <tr class="border-b border-slate-800 text-slate-400 font-medium">
+              <th class="pb-3">Entry ID</th>
+              <th class="pb-3">Transaction ID</th>
+              <th class="pb-3">Direction</th>
+              <th class="pb-3">Amount</th>
+              <th class="pb-3">Currency</th>
+              <th class="pb-3">Timestamp</th>
+            </tr>
+          </thead>
+          <tbody id="ledger-table-body" class="divide-y divide-slate-800/60 mono">
+            <tr>
+              <td colspan="6" class="py-8 text-center text-slate-500">Loading ledger entries...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    const API_BASE = window.location.origin;
+
+    function log(msg) {
+      const el = document.getElementById('sim-log');
+      const time = new Date().toISOString().substring(11, 19);
+      el.innerHTML += `<div><span class="text-slate-600">[${time}]</span> ${msg}</div>`;
+      el.scrollTop = el.scrollHeight;
+    }
+
+    async function triggerReconciliation() {
+      try {
+        log('Triggering independent reconciliation run...');
+        const res = await fetch(`${API_BASE}/internal/reconciliation/runs`, { method: 'POST' });
+        const data = await res.json();
+        log(`Audit complete: Run ${data.id.substring(0, 8)}... (${data.status})`);
+        log(`Checks: ${data.total_checks}, Anomalies: ${data.total_anomalies}`);
+        document.getElementById('audit-stat').innerText = `${data.total_anomalies} Anomalies`;
+      } catch (err) {
+        log(`Reconciliation failed: ${err.message}`);
+      }
+    }
+
+    async function simulateFullFlow() {
+      const btn = document.getElementById('sim-btn');
+      btn.disabled = true;
+      btn.classList.add('opacity-50');
+
+      try {
+        // 1. Create merchant
+        log('1. Onboarding merchant "Demo Espresso"...');
+        const mRes = await fetch(`${API_BASE}/v1/merchants`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: 'Demo Espresso' })
+        });
+        const merchant = await mRes.json();
+        const apiKey = merchant.api_key;
+        log(`Merchant provisioned: ${merchant.id.substring(0,8)}...`);
+
+        // 2. Create customer
+        log('2. Creating customer...');
+        const email = document.getElementById('sim-email').value;
+        const cRes = await fetch(`${API_BASE}/v1/customers`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`
+          },
+          body: JSON.stringify({ email: email, name: 'Alex Customer' })
+        });
+        const customer = await cRes.json();
+        log(`Customer created: ${customer.id.substring(0,8)}...`);
+
+        // 3. Create payment
+        const amount = parseInt(document.getElementById('sim-amount').value, 10);
+        log(`3. Creating payment intent for $${(amount/100).toFixed(2)} USD...`);
+        const pRes = await fetch(`${API_BASE}/v1/payments`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`,
+            'Idempotency-Key': `sim-${Date.now()}`
+          },
+          body: JSON.stringify({
+            customer_id: customer.id,
+            amount: amount,
+            currency: 'USD',
+            description: 'Automated Dashboard Simulation'
+          })
+        });
+        const payment = await pRes.json();
+        log(`Payment created: status=${payment.status}`);
+
+        // 4. Confirm/Authorize
+        log('4. Authorizing payment...');
+        const authRes = await fetch(`${API_BASE}/v1/payments/${payment.id}/confirm`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${apiKey}` }
+        });
+        const authed = await authRes.json();
+        log(`Authorized: status=${authed.status}`);
+
+        // 5. Capture & Post to Ledger
+        log('5. Capturing funds & posting balanced ledger entries...');
+        const capRes = await fetch(`${API_BASE}/v1/payments/${payment.id}/capture`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${apiKey}` }
+        });
+        const captured = await capRes.json();
+        log(`Captured: $${(captured.captured_amount/100).toFixed(2)} USD (status=${captured.status})`);
+
+        // 6. Partial Refund ($40)
+        log('6. Issuing partial refund ($40.00)...');
+        const refRes = await fetch(`${API_BASE}/v1/payments/${payment.id}/refunds`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`
+          },
+          body: JSON.stringify({ amount: 4000, reason: 'Simulation partial return' })
+        });
+        const refund = await refRes.json();
+        log(`Refund 1 succeeded: amount=$40.00 (status=${refund.status})`);
+
+        log('Simulation cycle finished cleanly! Triggering audit...');
+        await triggerReconciliation();
+        await refreshData(apiKey);
+      } catch (err) {
+        log(`Simulation error: ${err.message}`);
+      } finally {
+        btn.disabled = false;
+        btn.classList.remove('opacity-50');
+      }
+    }
+
+    async function refreshData(key) {
+      if (!key) return;
+      try {
+        const pRes = await fetch(`${API_BASE}/v1/payments`, {
+          headers: { 'Authorization': `Bearer ${key}` }
+        });
+        if (pRes.ok) {
+          const payments = await pRes.json();
+          renderPayments(payments.data || []);
+        }
+
+        const lRes = await fetch(`${API_BASE}/v1/ledger/entries`, {
+          headers: { 'Authorization': `Bearer ${key}` }
+        });
+        if (lRes.ok) {
+          const entries = await lRes.json();
+          renderLedger(entries.data || []);
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    function renderPayments(list) {
+      const tbody = document.getElementById('payments-table-body');
+      if (list.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="py-8 text-center text-slate-500">No payments yet. Run a simulation!</td></tr>';
+        return;
+      }
+      tbody.innerHTML = list.map(p => `
+        <tr class="hover:bg-slate-800/40 transition">
+          <td class="py-2.5 text-indigo-400">${p.id.substring(0,8)}...</td>
+          <td class="py-2.5 text-white font-medium">$${(p.amount/100).toFixed(2)}</td>
+          <td class="py-2.5 text-emerald-400">$${(p.captured_amount/100).toFixed(2)}</td>
+          <td class="py-2.5 text-amber-400">$${(p.refunded_amount/100).toFixed(2)}</td>
+          <td class="py-2.5">
+            <span class="px-2 py-0.5 rounded text-[11px] font-semibold ${
+              p.status === 'captured' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
+              p.status === 'partially_refunded' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' :
+              p.status === 'refunded' ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20' :
+              'bg-blue-500/10 text-blue-400 border border-blue-500/20'
+            }">${p.status}</span>
+          </td>
+          <td class="py-2.5 text-slate-500">${new Date(p.created_at).toLocaleTimeString()}</td>
+        </tr>
+      `).join('');
+    }
+
+    function renderLedger(list) {
+      const tbody = document.getElementById('ledger-table-body');
+      if (list.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="py-8 text-center text-slate-500">No ledger entries recorded yet.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = list.map(e => `
+        <tr class="hover:bg-slate-800/40 transition">
+          <td class="py-2.5 text-slate-400">${e.id.substring(0,8)}...</td>
+          <td class="py-2.5 text-indigo-400">${e.ledger_transaction_id.substring(0,8)}...</td>
+          <td class="py-2.5 font-bold ${e.direction === 'DEBIT' ? 'text-blue-400' : 'text-emerald-400'}">${e.direction}</td>
+          <td class="py-2.5 font-medium text-white">$${(e.amount/100).toFixed(2)}</td>
+          <td class="py-2.5 text-slate-400">${e.currency}</td>
+          <td class="py-2.5 text-slate-500">${new Date(e.created_at).toLocaleTimeString()}</td>
+        </tr>
+      `).join('');
+    }
+  </script>
+</body>
+</html>

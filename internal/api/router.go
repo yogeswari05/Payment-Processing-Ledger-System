@@ -5,9 +5,10 @@ import (
 	"net/http"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/payflow/payflow/internal/metrics"
 	"github.com/payflow/payflow/internal/service"
+	"github.com/payflow/payflow/web"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 type Handlers struct {
@@ -33,6 +34,15 @@ func NewRouter(
 	mux.HandleFunc("GET /healthz", handlers.Health.Healthz)
 	mux.HandleFunc("GET /readyz", handlers.Health.Readyz)
 	mux.Handle("GET /metrics", promhttp.Handler())
+
+	// Interactive Dashboard UI
+	dashboardHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(web.IndexHTML)
+	})
+	mux.Handle("GET /", dashboardHandler)
+	mux.Handle("GET /dashboard", dashboardHandler)
 
 	// 2. Merchant creation / onboarding (Public)
 	mux.HandleFunc("POST /v1/merchants", handlers.Merchant.CreateMerchant)
