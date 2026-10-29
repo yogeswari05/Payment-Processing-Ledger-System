@@ -1,0 +1,67 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: payflow-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgrespassword
+      POSTGRES_DB: payflow
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d payflow"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: payflow-api
+    entrypoint: ["/app/payflow-api"]
+    environment:
+      PORT: "8080"
+      DATABASE_URL: "postgres://postgres:postgrespassword@postgres:5432/payflow?sslmode=disable"
+      LOG_LEVEL: "INFO"
+      ENVIRONMENT: "production"
+      WORKER_ENABLED: "false" # Handled by dedicated worker container
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: payflow-worker
+    entrypoint: ["/app/payflow-worker"]
+    environment:
+      DATABASE_URL: "postgres://postgres:postgrespassword@postgres:5432/payflow?sslmode=disable"
+      LOG_LEVEL: "INFO"
+      WORKER_POLL_INTERVAL: "1s"
+      WORKER_BATCH_SIZE: "25"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: payflow-prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  pgdata:

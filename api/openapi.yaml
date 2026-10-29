@@ -1,0 +1,673 @@
+openapi: 3.1.0
+info:
+  title: PayFlow Payment Processing & Double-Entry Ledger System API
+  version: 1.0.0
+  description: |
+    Production-grade simulated payment processing platform featuring strict double-entry ledger bookkeeping,
+    PostgreSQL row-level locking concurrency controls, durable transactional outbox, and automated reconciliation.
+
+servers:
+  - url: http://localhost:8080
+    description: Local development server
+
+paths:
+  /healthz:
+    get:
+      summary: Liveness check
+      responses:
+        '200':
+          description: Service is alive
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+
+  /readyz:
+    get:
+      summary: Readiness probe
+      responses:
+        '200':
+          description: Service and database are ready
+        '503':
+          description: Database unreachable
+
+  /metrics:
+    get:
+      summary: Prometheus metrics endpoint
+      responses:
+        '200':
+          description: Prometheus exposition text
+
+  /v1/merchants:
+    post:
+      summary: Create and onboard a merchant
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  example: Acme Corp
+      responses:
+        '201':
+          description: Merchant created with one-time API key
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                  name:
+                    type: string
+                  status:
+                    type: string
+                    enum: [active, suspended, closed]
+                  api_key:
+                    type: string
+                    example: sk_test_0123456789abcdef
+
+  /v1/customers:
+    post:
+      summary: Create a customer under authenticated merchant
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, name]
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: customer@example.com
+                name:
+                  type: string
+                  example: Alice Smith
+      responses:
+        '201':
+          description: Customer created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Customer'
+
+  /v1/customers/{customer_id}:
+    get:
+      summary: Retrieve customer details
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: customer_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Customer'
+
+  /v1/payments:
+    post:
+      summary: Create payment intent
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [customer_id, amount, currency]
+              properties:
+                customer_id:
+                  type: string
+                  format: uuid
+                amount:
+                  type: integer
+                  description: Amount in minor units (e.g., cents)
+                  example: 10000
+                currency:
+                  type: string
+                  enum: [USD, EUR, GBP]
+                description:
+                  type: string
+                  example: Monthly Subscription
+                metadata:
+                  type: object
+      responses:
+        '201':
+          description: Payment created
+          headers:
+            Idempotent-Replayed:
+              schema:
+                type: boolean
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Payment'
+
+    get:
+      summary: List payments with cursor pagination
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: customer_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: starting_after
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Payment'
+                  has_more:
+                    type: boolean
+                  next_cursor:
+                    type: string
+
+  /v1/payments/{payment_id}:
+    get:
+      summary: Retrieve payment
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: payment_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Payment'
+
+  /v1/payments/{payment_id}/confirm:
+    post:
+      summary: Authorize payment
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: payment_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: Idempotency-Key
+          in: header
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Payment authorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Payment'
+
+  /v1/payments/{payment_id}/capture:
+    post:
+      summary: Capture authorized payment and post to double-entry ledger
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: payment_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: Idempotency-Key
+          in: header
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                amount:
+                  type: integer
+                  description: Optional partial capture amount (minor units)
+      responses:
+        '200':
+          description: Payment captured and balanced ledger transaction posted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Payment'
+
+  /v1/payments/{payment_id}/cancel:
+    post:
+      summary: Cancel uncaptured payment
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: payment_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: Idempotency-Key
+          in: header
+          schema:
+            type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Payment'
+
+  /v1/payments/{payment_id}/refunds:
+    post:
+      summary: Refund captured payment funds
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: payment_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: Idempotency-Key
+          in: header
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount]
+              properties:
+                amount:
+                  type: integer
+                  description: Refund amount in minor units
+                  example: 4000
+                reason:
+                  type: string
+                  example: Requested by customer
+      responses:
+        '201':
+          description: Refund created and reversing ledger entry posted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Refund'
+
+  /v1/refunds/{refund_id}:
+    get:
+      summary: Retrieve refund
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: refund_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Refund'
+
+  /v1/ledger/accounts:
+    get:
+      summary: List ledger accounts
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LedgerAccount'
+
+  /v1/ledger/transactions/{transaction_id}:
+    get:
+      summary: Retrieve balanced ledger transaction and entries
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: transaction_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LedgerTransaction'
+
+  /v1/ledger/entries:
+    get:
+      summary: List immutable ledger entries
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: account_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: transaction_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: starting_after
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/LedgerEntry'
+                  has_more:
+                    type: boolean
+                  next_cursor:
+                    type: string
+
+  /internal/reconciliation/runs:
+    post:
+      summary: Trigger an independent reconciliation audit
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReconciliationRun'
+
+  /internal/reconciliation/runs/{run_id}:
+    get:
+      summary: Retrieve reconciliation run findings
+      parameters:
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReconciliationRun'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+
+  schemas:
+    Customer:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        merchant_id:
+          type: string
+          format: uuid
+        email:
+          type: string
+        name:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    Payment:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        merchant_id:
+          type: string
+          format: uuid
+        customer_id:
+          type: string
+          format: uuid
+        amount:
+          type: integer
+          description: Amount in minor units (e.g. cents)
+        currency:
+          type: string
+          enum: [USD, EUR, GBP]
+        status:
+          type: string
+          enum: [created, authorized, captured, partially_refunded, refunded, canceled, failed]
+        captured_amount:
+          type: integer
+        refunded_amount:
+          type: integer
+        description:
+          type: string
+        metadata:
+          type: object
+        version:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+
+    Refund:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        payment_id:
+          type: string
+          format: uuid
+        merchant_id:
+          type: string
+          format: uuid
+        amount:
+          type: integer
+        currency:
+          type: string
+        status:
+          type: string
+          enum: [pending, succeeded, failed]
+        reason:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    LedgerAccount:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        account_type:
+          type: string
+          enum: [asset, liability, equity, revenue, expense]
+        name:
+          type: string
+        currency:
+          type: string
+        merchant_id:
+          type: string
+          format: uuid
+          nullable: true
+
+    LedgerTransaction:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        business_reference_type:
+          type: string
+          enum: [PAYMENT_CAPTURE, PAYMENT_REFUND, ADJUSTMENT]
+        business_reference_id:
+          type: string
+          format: uuid
+        transaction_type:
+          type: string
+        currency:
+          type: string
+        status:
+          type: string
+          enum: [POSTED, VOIDED]
+        description:
+          type: string
+        entries:
+          type: array
+          items:
+            $ref: '#/components/schemas/LedgerEntry'
+
+    LedgerEntry:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        ledger_transaction_id:
+          type: string
+          format: uuid
+        ledger_account_id:
+          type: string
+          format: uuid
+        direction:
+          type: string
+          enum: [DEBIT, CREDIT]
+        amount:
+          type: integer
+        currency:
+          type: string
+
+    ReconciliationRun:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [RUNNING, COMPLETED, FAILED]
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+        total_checks:
+          type: integer
+        total_anomalies:
+          type: integer
+        summary:
+          type: object
+        findings:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReconciliationFinding'
+
+    ReconciliationFinding:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        run_id:
+          type: string
+          format: uuid
+        anomaly_type:
+          type: string
+        severity:
+          type: string
+          enum: [LOW, MEDIUM, HIGH, CRITICAL]
+        entity_type:
+          type: string
+        entity_id:
+          type: string
+          format: uuid
+        description:
+          type: string
+        details:
+          type: object

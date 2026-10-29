@@ -1,0 +1,19 @@
+# Binaries
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test artifacts
+.pg_test*
+*.log
+*.out
+cover.out
+
+# Environment & IDE
+.env
+.idea/
+.vscode/
+*.swp
